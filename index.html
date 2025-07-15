@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Batch PNG to WebP Converter</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* For WebKit browsers */
+    input[type="file"]::-webkit-file-upload-button {
+        visibility: hidden;
+        display: none;
+    }
+    input[type="file"]::before {
+      content: 'Select PNG Files';
+      display: inline-block;
+      background: #3b82f6; /* bg-blue-500 */
+      color: white;
+      border: 1px solid #3b82f6;
+      border-radius: 0.25rem; /* rounded-md */
+      padding: 0.5rem 1rem; /* px-4 py-2 */
+      outline: none;
+      white-space: nowrap;
+      cursor: pointer;
+      font-weight: 600; /* font-semibold */
+      margin-right: 0.75rem; /* mr-3 */
+    }
+    input[type="file"]:hover::before {
+      background: #2563eb; /* bg-blue-600 */
+    }
+    input[type="file"]:active::before {
+      background: #1d4ed8; /* bg-blue-700 */
+    }
+    input[type="file"] {
+        color: #4b5563; /* text-gray-600 */
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "react": "https://esm.sh/react@^19.1.0",
+    "jszip": "https://esm.sh/jszip@^3.10.1",
+    "file-saver": "https://esm.sh/file-saver@^2.0.5"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-slate-900">
+  <div id="root"></div>
+
+  <!-- Load libraries as global variables -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  
+  <!-- Babel to transpile JSX in the browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- All Application Code Inlined Below -->
+  <script type="text/babel" data-presets="react,typescript">
+    const { useState, useCallback, useMemo, StrictMode } = React;
+    const JSZip = window.JSZip;
+    const saveAs = window.saveAs;
+
+    // --- Inlined from types.ts ---
+    const AlertType = {
+      Error: 'error',
+      Success: 'success',
+      Warning: 'warning',
+    };
+
+    const ConversionStatus = {
+        Pending: 'pending',
+        Converting: 'converting',
+        Converted: 'converted',
+        Error: 'error',
+    };
+
+    // --- Inlined from constants.ts ---
+    const APP_TITLE = "Batch PNG to WebP Converter";
+    const DEFAULT_WEBP_QUALITY = 0.85;
+    const PNG_MIME_TYPE = "image/png";
+    
+    // --- Inlined from components/Spinner.tsx ---
+    const Spinner = ({ size = 'h-8 w-8', color = 'text-blue-500', className = '' }) => {
+      return (
+        <div className={`flex justify-center items-center ${className}`}>
+          <svg className={`animate-spin ${size} ${color}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+        </div>
+      );
+    };
+
+    // --- Inlined from components/Alert.tsx ---
+    const Alert = ({ message, type = AlertType.Error, onClose }) => {
+      const baseStyle = "p-4 rounded-md flex items-center justify-between shadow-md text-sm";
+      const typeStyles = {
+        [AlertType.Error]: "bg-red-500/20 border border-red-700 text-red-300",
+        [AlertType.Success]: "bg-green-500/20 border border-green-700 text-green-300",
+        [AlertType.Warning]: "bg-yellow-500/20 border border-yellow-700 text-yellow-300",
+      };
+
+      const Icon = () => {
+        switch (type) {
+          case AlertType.Error:
+            return (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            );
+          case AlertType.Success:
+            return (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            );
+          case AlertType.Warning:
+            return (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            );
+          default:
+            return null;
+        }
+      }
+
+      return (
+        <div className={`${baseStyle} ${typeStyles[type]}`} role="alert">
+          <div className="flex items-center">
+            <Icon />
+            <span>{message}</span>
+          </div>
+          {onClose && (
+            <button 
+              onClick={onClose} 
+              className="ml-4 text-lg font-semibold hover:text-white"
+              aria-label="Close alert"
+            >
+              &times;
+            </button>
+          )}
+        </div>
+      );
+    };
+
+    // --- Inlined from components/Button.tsx ---
+    const Button = ({
+      children,
+      variant = 'primary',
+      isLoading = false,
+      className,
+      ...props
+    }) => {
+      const baseStyle = "px-4 py-2 rounded-md font-semibold focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 transition-all duration-150 ease-in-out disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center shadow-md hover:shadow-lg";
+      
+      const variantStyles = {
+        primary: "bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500",
+        secondary: "bg-slate-600 hover:bg-slate-700 text-slate-100 focus:ring-slate-500",
+        danger: "bg-red-600 hover:bg-red-700 text-white focus:ring-red-500",
+      };
+
+      return (
+        <button
+          className={`${baseStyle} ${variantStyles[variant]} ${className || ''}`}
+          disabled={isLoading || props.disabled}
+          {...props}
+        >
+          {isLoading && (
+            <svg className="animate-spin -ml-1 mr-3 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          )}
+          {children}
+        </button>
+      );
+    };
+
+    // --- Inlined from components/QualitySlider.tsx ---
+    const QualitySlider = ({ quality, onQualityChange, disabled = false }) => {
+      const handleChange = (event) => {
+        onQualityChange(parseFloat(event.target.value));
+      };
+
+      return (
+        <div className="my-4">
+          <label htmlFor="quality" className="block text-sm font-medium text-slate-300 mb-2">
+            WebP Quality: <span className="font-bold text-blue-400">{(quality * 100).toFixed(0)}%</span>
+          </label>
+          <input
+            type="range"
+            id="quality"
+            name="quality"
+            min="0.01"
+            max="1.0"
+            step="0.01"
+            value={quality}
+            onChange={handleChange}
+            disabled={disabled}
+            className="w-full h-3 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-800"
+          />
+          <div className="flex justify-between text-xs text-slate-500 mt-1 px-1">
+            <span>Lower (Smaller File)</span>
+            <span>Higher (Larger File)</span>
+          </div>
+        </div>
+      );
+    };
+    
+    // --- Inlined from components/FileListItem.tsx ---
+    const FileListItem = ({ entry, onRemove, onDownload, formatBytes }) => {
+        const { 
+            originalImagePreview,
+            originalFileSize,
+            convertedImageUrl,
+            convertedFileSize,
+            status,
+            error
+        } = entry;
+
+        const getSavings = () => {
+            if (status !== ConversionStatus.Converted || !convertedFileSize) return null;
+            const savingsBytes = originalFileSize - convertedFileSize;
+            const savingsPercent = (1 - convertedFileSize / originalFileSize) * 100;
+            if (savingsBytes < 0) return null;
+            return {
+                bytes: formatBytes(savingsBytes),
+                percent: savingsPercent.toFixed(1)
+            };
+        };
+
+        const savings = getSavings();
+
+        const getStatusBorderColor = () => {
+            switch (status) {
+                case ConversionStatus.Converted:
+                    return 'border-green-500/50';
+                case ConversionStatus.Error:
+                    return 'border-red-500/50';
+                case ConversionStatus.Converting:
+                    return 'border-blue-500/50 animate-pulse';
+                default:
+                    return 'border-slate-700';
+            }
+        };
+        
+        return (
+            <div className={`p-4 bg-slate-800/50 rounded-lg border ${getStatusBorderColor()} transition-colors duration-300 flex flex-col md:flex-row items-center gap-4`}>
+                <div className="flex gap-2 items-center w-full md:w-auto">
+                    <div className="flex-shrink-0 w-20 h-20 bg-slate-700/50 rounded-md flex items-center justify-center overflow-hidden">
+                        <img src={originalImagePreview} alt="Original" className="max-w-full max-h-full object-contain" />
+                    </div>
+                    <div className="flex-shrink-0 w-20 h-20 bg-slate-700/50 rounded-md flex items-center justify-center overflow-hidden">
+                      {status === ConversionStatus.Converted && convertedImageUrl ? (
+                          <img src={convertedImageUrl} alt="Converted" className="max-w-full max-h-full object-contain" />
+                      ) : status === ConversionStatus.Converting ? (
+                          <Spinner size="h-6 w-6" />
+                      ) : (
+                          <span className="text-slate-500 text-3xl">?</span>
+                      )}
+                    </div>
+                </div>
+
+                <div className="flex-grow text-center md:text-left">
+                    <p className="font-semibold text-slate-200 truncate" title={entry.file.name}>{entry.file.name}</p>
+                    {status !== ConversionStatus.Error ? (
+                        <p className="text-sm text-slate-400">
+                            {formatBytes(originalFileSize)} &rarr; {status === ConversionStatus.Converted ? formatBytes(convertedFileSize) : '...'}
+                        </p>
+                    ) : (
+                        <p className="text-sm text-red-400 truncate" title={error || ''}>Error: {error}</p>
+                    )}
+                    {savings && (
+                        <p className="text-sm text-green-400">
+                            Saved {savings.bytes} ({savings.percent}%)
+                        </p>
+                    )}
+                </div>
+
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    {status === ConversionStatus.Converted && (
+                        <Button 
+                          onClick={onDownload} 
+                          variant="secondary" 
+                          className="!py-1.5 !px-3 text-sm bg-green-600 hover:bg-green-700"
+                        >
+                            Download
+                        </Button>
+                    )}
+                    <button 
+                        onClick={onRemove} 
+                        className="text-slate-500 hover:text-red-400 transition-colors p-1.5 rounded-full"
+                        aria-label="Remove file"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        );
+    };
+    
+    // --- Inlined from App.tsx ---
+    const App = () => {
+      const [fileEntries, setFileEntries] = useState([]);
+      const [quality, setQuality] = useState(DEFAULT_WEBP_QUALITY);
+      const [isBatchConverting, setIsBatchConverting] = useState(false);
+      const [globalError, setGlobalError] = useState(null);
+
+      const formatBytes = useCallback((bytes, decimals = 2) => {
+        if (!bytes || bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+      }, []);
+
+      const handleFileChange = (event) => {
+        const files = event.target.files;
+        if (!files) return;
+
+        const newEntries = Array.from(files)
+          .filter(file => file.type === PNG_MIME_TYPE)
+          .map(file => ({
+            id: `${file.name}-${file.lastModified}-${file.size}`,
+            file,
+            originalImagePreview: URL.createObjectURL(file),
+            originalFileSize: file.size,
+            convertedImageUrl: null,
+            convertedFileSize: null,
+            status: ConversionStatus.Pending,
+            error: null,
+          }));
+        
+        const nonPngFiles = Array.from(files).filter(file => file.type !== PNG_MIME_TYPE);
+        if (nonPngFiles.length > 0) {
+            setGlobalError(`Ignored ${nonPngFiles.length} non-PNG file(s).`);
+        } else {
+            setGlobalError(null);
+        }
+
+        setFileEntries(prev => {
+            const existingIds = new Set(prev.map(e => e.id));
+            const uniqueNewEntries = newEntries.filter(ne => !existingIds.has(ne.id));
+            return [...prev, ...uniqueNewEntries];
+        });
+
+        event.target.value = '';
+      };
+      
+      const getBlobFromDataURL = (dataURL) => {
+        const [header, base64Data] = dataURL.split(',');
+        const mimeType = header.match(/:(.*?);/)?.[1] || 'image/webp';
+        const byteString = atob(base64Data);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+          ia[i] = byteString.charCodeAt(i);
+        }
+        return new Blob([ab], { type: mimeType });
+      };
+
+      const performConversion = useCallback(async (entry) => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (loadEvent) => {
+                const originalDataUrl = loadEvent.target?.result;
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                        resolve({ ...entry, status: ConversionStatus.Error, error: "Failed to get canvas context." });
+                        return;
+                    }
+                    ctx.drawImage(img, 0, 0);
+                    try {
+                        const webpDataUrl = canvas.toDataURL('image/webp', quality);
+                        const webpBlob = getBlobFromDataURL(webpDataUrl);
+                        resolve({
+                            ...entry,
+                            convertedImageUrl: webpDataUrl,
+                            convertedFileSize: webpBlob.size,
+                            status: ConversionStatus.Converted,
+                        });
+                    } catch (e) {
+                        const message = e instanceof Error ? e.message : String(e);
+                        resolve({ ...entry, status: ConversionStatus.Error, error: `Conversion failed: ${message}` });
+                    }
+                };
+                img.onerror = () => {
+                    resolve({ ...entry, status: ConversionStatus.Error, error: "Failed to load image. It may be corrupted." });
+                };
+                img.src = originalDataUrl;
+            };
+            reader.onerror = () => {
+                resolve({ ...entry, status: ConversionStatus.Error, error: "Failed to read file." });
+            };
+            reader.readAsDataURL(entry.file);
+        });
+      }, [quality]);
+
+
+      const handleConvertAll = async () => {
+        const entriesToConvert = fileEntries.filter(e => e.status === ConversionStatus.Pending);
+        if (entriesToConvert.length === 0) return;
+
+        setIsBatchConverting(true);
+        setGlobalError(null);
+
+        setFileEntries(prev => prev.map(e => e.status === ConversionStatus.Pending ? { ...e, status: ConversionStatus.Converting } : e));
+
+        const conversionPromises = entriesToConvert.map(entry => performConversion(entry));
+        
+        for (const promise of conversionPromises) {
+            const result = await promise;
+            setFileEntries(prev => prev.map(e => e.id === result.id ? result : e));
+        }
+
+        setIsBatchConverting(false);
+      };
+      
+      const handleDownload = (entry) => {
+        if (!entry.convertedImageUrl) return;
+        const webpFilename = entry.file.name.replace(/\.[^/.]+$/, ".webp");
+        const blob = getBlobFromDataURL(entry.convertedImageUrl);
+        saveAs(blob, webpFilename);
+      };
+
+      const handleDownloadAll = async () => {
+        const convertedEntries = fileEntries.filter(e => e.status === ConversionStatus.Converted && e.convertedImageUrl);
+        if (convertedEntries.length === 0) return;
+
+        const zip = new JSZip();
+        convertedEntries.forEach(entry => {
+            if(entry.convertedImageUrl) {
+                const webpFilename = entry.file.name.replace(/\.[^/.]+$/, ".webp");
+                const blob = getBlobFromDataURL(entry.convertedImageUrl);
+                zip.file(webpFilename, blob);
+            }
+        });
+        
+        try {
+            const zipBlob = await zip.generateAsync({ type: "blob" });
+            saveAs(zipBlob, "converted_images.zip");
+        } catch(e) {
+            const message = e instanceof Error ? e.message : String(e);
+            setGlobalError(`Failed to create zip file: ${message}`);
+        }
+      };
+
+      const handleRemoveFile = (id) => {
+        setFileEntries(prev => prev.filter(entry => {
+            if(entry.id === id) {
+                if(entry.originalImagePreview) URL.revokeObjectURL(entry.originalImagePreview);
+                return false;
+            }
+            return true;
+        }));
+      };
+
+      const handleClearAll = () => {
+        fileEntries.forEach(entry => {
+            if (entry.originalImagePreview) {
+                URL.revokeObjectURL(entry.originalImagePreview);
+            }
+        });
+        setFileEntries([]);
+        setGlobalError(null);
+      };
+      
+      const { pendingCount, convertedCount } = useMemo(() => {
+        return fileEntries.reduce((acc, curr) => {
+            if (curr.status === ConversionStatus.Pending) acc.pendingCount++;
+            if (curr.status === ConversionStatus.Converted) acc.convertedCount++;
+            return acc;
+        }, { pendingCount: 0, convertedCount: 0 });
+      }, [fileEntries]);
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-gray-100 flex flex-col items-center p-4 sm:p-6 md:p-8">
+          <header className="w-full max-w-6xl mb-8 text-center">
+            <h1 className="text-4xl sm:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-pink-500 to-purple-500">{APP_TITLE}</h1>
+            <p className="text-slate-400 mt-2 text-sm sm:text-base">Convert multiple PNG images to modern WebP format with ease.</p>
+          </header>
+
+          <main className="w-full max-w-6xl bg-slate-800 shadow-2xl rounded-xl p-6 sm:p-8 space-y-6">
+            <div className="p-4 border border-slate-700 rounded-lg bg-slate-800/50 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                    <div>
+                         <label htmlFor="file-upload" className="block text-sm font-medium text-slate-300 mb-2">
+                            1. Add PNG Files
+                        </label>
+                        <input
+                            id="file-upload"
+                            type="file"
+                            accept={PNG_MIME_TYPE}
+                            onChange={handleFileChange}
+                            className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 disabled:opacity-50"
+                            disabled={isBatchConverting}
+                            multiple
+                        />
+                    </div>
+                    <div>
+                        <h2 className="block text-sm font-medium text-slate-300 mb-2">2. Adjust Quality</h2>
+                        <QualitySlider
+                            quality={quality}
+                            onQualityChange={setQuality}
+                            disabled={isBatchConverting}
+                        />
+                    </div>
+                </div>
+                 {globalError && (
+                    <Alert message={globalError} type={AlertType.Warning} onClose={() => setGlobalError(null)} />
+                 )}
+                <div className="flex flex-wrap gap-3 items-center justify-start pt-4 border-t border-slate-700">
+                    <Button
+                        onClick={handleConvertAll}
+                        isLoading={isBatchConverting}
+                        disabled={isBatchConverting || pendingCount === 0}
+                    >
+                        {isBatchConverting ? 'Converting...' : `Convert All (${pendingCount})`}
+                    </Button>
+                    <Button
+                        onClick={handleDownloadAll}
+                        disabled={isBatchConverting || convertedCount === 0}
+                        variant="secondary"
+                        className="bg-green-600 hover:bg-green-700 focus:ring-green-500"
+                    >
+                        Download All ({convertedCount})
+                    </Button>
+                     <Button
+                        onClick={handleClearAll}
+                        disabled={isBatchConverting || fileEntries.length === 0}
+                        variant="danger"
+                    >
+                        Clear All ({fileEntries.length})
+                    </Button>
+                </div>
+            </div>
+
+            <div className="space-y-4 min-h-[200px]">
+                {fileEntries.length === 0 ? (
+                     <div className="text-center py-10 border-2 border-dashed border-slate-700 rounded-lg">
+                        <p className="text-slate-500">Add some PNG files to get started.</p>
+                    </div>
+                ) : (
+                    fileEntries.map(entry => (
+                        <FileListItem 
+                            key={entry.id}
+                            entry={entry}
+                            onRemove={() => handleRemoveFile(entry.id)}
+                            onDownload={() => handleDownload(entry)}
+                            formatBytes={formatBytes}
+                        />
+                    ))
+                )}
+            </div>
+          </main>
+           <footer className="w-full max-w-6xl mt-8 text-center text-slate-500 text-xs">
+            <p>&copy; {new Date().getFullYear()} Batch PNG to WebP Converter. All client-side, no data uploaded.</p>
+          </footer>
+        </div>
+      );
+    };
+
+    // --- Inlined from index.tsx ---
+    const rootElement = document.getElementById('root');
+    if (!rootElement) {
+      throw new Error("Could not find root element to mount to");
+    }
+
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(
+      <StrictMode>
+        <App />
+      </StrictMode>
+    );
+
+  </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
